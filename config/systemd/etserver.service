@@ -1,0 +1,15 @@
+[Unit]
+Description=Eternal Terminal Server Daemon
+After=network.target
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=/home/your-user/.local/lib
+ExecStartPre=/bin/mkdir -m 0700 -p /tmp/etserver-your-user
+ExecStart=/home/your-user/.local/bin/etserver --port=2022 --serverfifo=/tmp/etserver-your-user/et.fifo --logtostdout --telemetry=false
+Restart=always
+RestartSec=3
+MemoryLow=50M
+
+[Install]
+WantedBy=default.target

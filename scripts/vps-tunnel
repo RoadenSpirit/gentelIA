@@ -1,0 +1,564 @@
+#!/bin/bash
+# launcher_opencode_web_menu.sh
+# Nueva estrategia (inspirada en launcher_mosh.sh original, cambiando mosh por
+# opencode web vía túnel SSH):
+#
+#   - La TUI corre EN TU PC (opencode attach local) vía túnel SSH.
+#   - El backend opencode web y TODAS las llamadas a la IA/MCP/archivos corren
+#     en el server (systemd user service opencode-server).
+#   - Menú con control total del usuario:
+#       1) RECONECTAR a alguna de las sesiones activas del backend.
+#       2) INICIAR en alguna de las carpetas de proyectos (~/proyectos/...).
+#          Nunca se usa la carpeta "proyectos" raíz como base de un chat.
+#       3) INICIAR NUEVO PROYECTO (crea carpeta en la VPS).
+#       4) SALIR.
+
+SSH_PORT="22"
+REMOTE_HOST="YOUR_VPS_IP"
+REMOTE_HOST_WG="10.8.0.1"        # IP interna por WireGuard (primera opción)
+REMOTE_USER="your-user"
+OPNCD_SERVER_USERNAME="asere"
+OPNCD_SERVER_PASSWORD="YOUR_OPENCODE_PASSWORD"
+OPNCD_LOCAL_PORT="4096"          # puerto local donde se tunela el backend
+PROJ_ROOT="/home/${REMOTE_USER}/proyectos"
+
+# --- Alias de acceso (la LLAVE). UN SOLO alias por PC. Se define en la primera
+#     ejecucion y queda persistente en ~/.config/opencode/alias.json.
+#     Para cambiar de alias (ej: dev1 -> paco) edita ese JSON.
+ALIAS_FILE="${ALIAS_CONFIG_FILE:-$HOME/.config/opencode/alias.json}"
+
+load_alias() {
+    if [ -f "$ALIAS_FILE" ]; then
+        python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    a = d.get("alias", "")
+    sys.stdout.write(a)
+except Exception:
+    pass
+' "$ALIAS_FILE" 2>/dev/null
+    fi
+}
+
+save_alias() {
+    mkdir -p "$(dirname "$ALIAS_FILE")"
+    printf '{\n  "alias": "%s"\n}\n' "$1" > "$ALIAS_FILE"
+    chmod 600 "$ALIAS_FILE"
+}
+
+ALIAS="$(load_alias)"
+
+clear
+echo "=========================================================="
+echo "     LANZADOR OPENCODE WEB (túnel permanente + attach)     "
+echo "=========================================================="
+if [ -n "$ALIAS" ]; then
+    echo "  Alias: $ALIAS"
+    echo ""
+fi
+
+# --- Primera ejecucion: definir el alias de acceso ----------------------------
+if [ -z "$ALIAS" ]; then
+    echo "=== PRIMERA EJECUCION: define tu ALIAS de acceso ==="
+    echo "El alias es tu llave en la VPS: con el veras tus sesiones y"
+    echo "conversaciones. Un PC solo usa UN alias a la vez."
+    echo ""
+    read -p "Alias (solo a-z 0-9 _ - , ej: dev1): " new_alias
+    new_alias=$(echo "$new_alias" | tr -cd 'a-zA-Z0-9_-' | tr 'A-Z' 'a-z')
+    if [ -z "$new_alias" ]; then
+        echo "Alias invalido. Saliendo."
+        exit 1
+    fi
+    save_alias "$new_alias"
+    ALIAS="$new_alias"
+    echo "Alias guardado en $ALIAS_FILE (para cambiarlo, edita ese archivo)."
+    echo ""
+fi
+
+# --- opencode local es obligatorio (es quien dibuja la TUI en tu PC) ---
+LOCAL_OPN=""
+if command -v opencode >/dev/null 2>&1; then
+    LOCAL_OPN="opencode"
+else
+    for c in ~/.opencode/bin/opencode /usr/local/bin/opencode; do
+        [ -x "$c" ] && LOCAL_OPN="$c" && break
+    done
+fi
+if [ -z "$LOCAL_OPN" ]; then
+    echo "Error: no hay binario 'opencode' local. La TUI debe correr en tu PC."
+    echo "Instálalo con:  curl -fsSL https://opencode.ai/install | bash"
+    exit 1
+fi
+echo "TUI local: $LOCAL_OPN ($("$LOCAL_OPN" --version 2>/dev/null | head -1))"
+echo ""
+
+# --- 1) Elegir ruta: intentar WireGuard (10.8.0.1), iniciar wg0 si hace falta, fallback a IP pública ---
+USE_HOST=""
+if ! ping -c 2 -W 3 "$REMOTE_HOST_WG" &>/dev/null; then
+    if command -v wg-quick >/dev/null 2>&1; then
+        echo "WireGuard no está activo. Intentando levantar la interfaz wg0 automáticamente (requiere sudo)..."
+        sudo wg-quick up wg0 || sudo systemctl start wg-quick@wg0 || true
+        sleep 2
+    fi
+fi
+
+if ping -c 2 -W 3 "$REMOTE_HOST_WG" &>/dev/null; then
+    USE_HOST="$REMOTE_HOST_WG"
+    echo "Ruta: WireGuard ($USE_HOST) [Activo]"
+else
+    USE_HOST="$REMOTE_HOST"
+    echo "Ruta: IP pública ($USE_HOST)  [WireGuard no disponible / fallback activado]"
+fi
+
+# --- 2) Comprobar conectividad SSH antes de cualquier pregunta ---
+ssh -n -o ConnectTimeout=8 -o BatchMode=yes -p "$SSH_PORT" \
+    "${REMOTE_USER}@${USE_HOST}" "echo OK" &>/dev/null
+if [ $? -ne 0 ]; then
+    # Si falló por WG, reintentar por IP pública
+    if [ "$USE_HOST" = "$REMOTE_HOST_WG" ]; then
+        echo "WireGuard no responde SSH, reintentando por IP pública..."
+        USE_HOST="$REMOTE_HOST"
+        ssh -n -o ConnectTimeout=8 -o BatchMode=yes -p "$SSH_PORT" \
+            "${REMOTE_USER}@${USE_HOST}" "echo OK" &>/dev/null
+    fi
+    if [ $? -ne 0 ]; then
+        echo "Error: no se pudo conectar por SSH a ${USE_HOST}:${SSH_PORT} como ${REMOTE_USER}."
+        echo "Verifica que la VPS esté activa y su llave SSH configurada."
+        exit 1
+    fi
+fi
+echo "Conexión SSH comprobada con éxito ($USE_HOST)."
+echo "Obteniendo estado del server (backend, sesiones y proyectos)..."
+
+# --- Registrar el alias en la VPS si aún no existe ----------------------------
+ssh -n -o ConnectTimeout=10 -o BatchMode=yes -p "$SSH_PORT" \
+    "${REMOTE_USER}@${USE_HOST}" "~/IA/aliases.sh exists '$ALIAS'" \
+    2>/dev/null
+if [ $? -ne 0 ]; then
+    ssh -n -o ConnectTimeout=10 -o BatchMode=yes -p "$SSH_PORT" \
+        "${REMOTE_USER}@${USE_HOST}" "~/IA/aliases.sh add '$ALIAS'" 2>/dev/null
+    echo "Alias '$ALIAS' registrado en la VPS."
+fi
+echo "Alias de acceso: $ALIAS"
+echo ""
+
+# --- 2) Snapshot remoto: backends + sesiones + proyectos (1 sola llamada) ---
+snapshot=""
+for attempt in 1 2 3; do
+    snapshot=$(ALIAS="$ALIAS" ssh -o ConnectTimeout=10 -o BatchMode=yes -p "$SSH_PORT" \
+        "${REMOTE_USER}@${USE_HOST}" bash -s <<'EOF' 2>/dev/null
+export OPENCODE_SERVER_USERNAME="asere"
+export OPENCODE_SERVER_PASSWORD="YOUR_OPENCODE_PASSWORD"
+PROJ_ROOT="/home/${USER:-your-user}/proyectos"
+ALIAS="${ALIAS:-}"
+
+echo "@BACKENDS"
+ps -eo pid=,args= | grep '[o]pencode web' | while read -r pid rest; do
+    port=$(echo "$rest" | sed -n 's/.*--port[ =]\([0-9]*\).*/\1/p')
+    [ -n "$port" ] && echo "$port"
+done
+
+echo "@SESSIONS"
+python3 - <<'PY'
+import json, os, urllib.request, base64, sys, re, subprocess
+host = os.environ["OPENCODE_SERVER_USERNAME"]
+pw = os.environ["OPENCODE_SERVER_PASSWORD"]
+alias = os.environ.get("ALIAS", "")
+port = "4096"
+try:
+    out = subprocess.check_output(["ps", "-eo", "args="], text=True, timeout=5).splitlines()
+    for line in out:
+        if "opencode web" in line and "--port" in line:
+            m = re.search(r"--port[ =](\d+)", line)
+            if m:
+                port = m.group(1)
+                break
+except Exception:
+    pass
+creds = base64.b64encode(f"{host}:{pw}".encode()).decode()
+req = urllib.request.Request(f"http://127.0.0.1:{port}/session",
+                             headers={"Authorization": f"Basic {creds}"})
+try:
+    data = json.load(urllib.request.urlopen(req, timeout=8))
+except Exception as e:
+    sys.stderr.write(str(e)); sys.exit(1)
+
+# Sesiones que pertenecen a este alias (su llave) -> de la VPS via aliases.sh
+mine = set()
+if alias:
+    try:
+        mine = set(subprocess.check_output(
+            ["bash", "-c", f"~/IA/aliases.sh sessions '{alias}'"],
+            text=True, timeout=5).splitlines())
+    except Exception:
+        mine = set()
+
+projs = set()
+if alias:
+    try:
+        projs = set(subprocess.check_output(
+            ["bash", "-c", f"~/IA/aliases.sh projects '{alias}'"],
+            text=True, timeout=5).splitlines())
+    except Exception:
+        projs = set()
+
+for s in data:
+    sid = s.get("id", "")
+    if not sid:
+        continue
+    d = s.get("directory", "")
+    pname = os.path.basename(os.path.normpath(d)) if d else ""
+    if alias and (sid not in mine) and (pname not in projs):
+        continue  # solo muestra lo que es del alias (por SID o por proyecto asignado)
+    t = (s.get("title") or "").replace("\t", " ").replace("\n", " ")
+    upd = s.get("time", {}).get("updated", 0)
+    print(f"{sid}\t{d}\t{upd}\t{t}")
+PY
+
+echo "@PROJECTS"
+mkdir -p "$PROJ_ROOT"
+find "$PROJ_ROOT" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null
+EOF
+)
+    if echo "$snapshot" | grep -q "@BACKENDS"; then
+        break
+    fi
+    [ "$attempt" -lt 3 ] && echo "Snapshot incompleto (intento $attempt/3). Reintentando..."
+done
+
+if ! echo "$snapshot" | grep -q "@BACKENDS"; then
+    echo "Error: no se pudo obtener el estado del server tras 3 intentos."
+    echo "Verifica la conexión SSH y que el server responda."
+    exit 1
+fi
+
+# --- Parsear snapshot ---
+backends=()
+section=""
+while IFS= read -r line; do
+    case "$line" in
+        "@BACKENDS") section=backends ;;
+        "@SESSIONS") section=sessions ;;
+        "@PROJECTS") section=projects ;;
+        *)
+            case "$section" in
+                backends) [ -n "$line" ] && backends+=("$line") ;;
+                sessions)
+                    IFS=$'\t' read -r sid dir upd title <<< "$line"
+                    [ -n "$sid" ] || continue
+                    session_ids+=("$sid")
+                    session_dirs+=("$dir")
+                    session_updated+=("${upd:-0}")
+                    session_titles+=("$title")
+                    ;;
+                projects) [ -n "$line" ] && projects+=("$line") ;;
+            esac
+            ;;
+    esac
+done <<< "$snapshot"
+
+if [ ${#backends[@]} -eq 0 ]; then
+    echo "No hay ningún backend 'opencode web' activo en el server."
+    echo "Lánzalo con: systemctl --user start opencode-server  (usuario ${REMOTE_USER})"
+    exit 1
+fi
+
+if [ ${#backends[@]} -eq 1 ]; then
+    REMOTE_PORT="${backends[0]}"
+else
+    echo ""
+    echo "--- BACKENDS OPENCODE WEB DETECTADOS ---"
+    for i in "${!backends[@]}"; do
+        echo "  [$((i + 1))] - backend en puerto ${backends[$i]}"
+    done
+    read -p "Ingresa una opción [1-${#backends[@]}]: " sel
+    if [ -z "$sel" ] || [ "$sel" -lt 1 ] 2>/dev/null || [ "$sel" -gt "${#backends[@]}" ] 2>/dev/null; then
+        echo "Opción inválida."
+        exit 1
+    fi
+    REMOTE_PORT="${backends[$((sel - 1))]}"
+fi
+
+# --- 3) Menú principal (estilo launcher_mosh.sh) ---
+clear
+echo "=========================================================="
+echo "     LANZADOR OPENCODE WEB (túnel permanente + attach)     "
+echo "=========================================================="
+echo "  Alias: $ALIAS"
+echo "  Backend: 127.0.0.1:$REMOTE_PORT  (túnel local:$OPNCD_LOCAL_PORT, autossh)"
+echo ""
+
+option_index=1
+proj_start_option=$option_index
+
+echo "--- PROYECTOS DISPONIBLES EN LA VPS ---"
+for proj in "${projects[@]}"; do
+    echo "  [$option_index] - Iniciar en: $proj"
+    proj_option_index[$option_index]=$proj
+    ((option_index++))
+done
+echo ""
+option_new=$option_index
+option_exit=$((option_index + 1))
+
+echo "--- OPCIONES GENERALES ---"
+echo "  [$option_new] - INICIAR NUEVO PROYECTO (nueva carpeta en la VPS)"
+echo "  [$option_exit] - Salir"
+echo ""
+read -p "Ingresa una opción [1-$option_exit]: " seleccion
+
+if [ -z "$seleccion" ] || [ "$seleccion" -eq "$option_exit" ] 2>/dev/null; then
+    echo "Saliendo del lanzador."
+    exit 0
+fi
+
+# --- Evaluar selección ---
+ACTION=""
+SESSION_ID=""
+SESSION_DIR=""
+NEW_PROJECT=""
+
+# --- Evaluar selección ---
+ACTION=""
+SESSION_ID=""
+SESSION_DIR=""
+NEW_PROJECT=""
+
+# Caso A: INICIAR en un proyecto existente (submenú de últimos 3 chats)
+if [ "$seleccion" -ge "$proj_start_option" ] && [ "$seleccion" -lt "$option_new" ] 2>/dev/null; then
+    proj_name="${proj_option_index[$seleccion]}"
+    [ -z "$proj_name" ] && proj_name=""
+    if [ -n "$proj_name" ]; then
+        SESSION_DIR="${PROJ_ROOT}/${proj_name}"
+        proj_target=$(basename "$SESSION_DIR")
+        
+        # Buscar todas las sesiones de este proyecto ordenadas por tiempo de actualización
+        # Obtenemos también las sesiones registradas en el alias para este proyecto
+        alias_sids=$(ssh -n -o ConnectTimeout=8 -o BatchMode=yes -p "$SSH_PORT" \
+            "${REMOTE_USER}@${USE_HOST}" \
+            "~/IA/aliases.sh sessions-in '$ALIAS' '$proj_target'" 2>/dev/null <<<'' )
+        
+        # Recopilar índices de sesiones coincidentes
+        matched_indices=()
+        for i in "${!session_ids[@]}"; do
+            s_dir="${session_dirs[$i]}"
+            s_proj=$(basename "$s_dir")
+            in_alias=false
+            if [ -n "$alias_sids" ] && echo "$alias_sids" | grep -qx "${session_ids[$i]}"; then
+                in_alias=true
+            fi
+            if [ "$s_proj" = "$proj_target" ] || [ "${s_dir%/}" = "${SESSION_DIR%/}" ] || [ "$in_alias" = true ]; then
+                matched_indices+=("$i")
+            fi
+        done
+        
+        # Ordenar las sesiones encontradas por timestamp (decreciente)
+        # Usamos python para un ordenamiento perfecto y limpio
+        sorted_indices=()
+        if [ ${#matched_indices[@]} -gt 0 ]; then
+            idx_input=""
+            for idx in "${matched_indices[@]}"; do
+                idx_input+="${idx}	${session_updated[$idx]:-0}
+"
+            done
+            sorted_indices=($(python3 -c '
+import sys
+items = []
+for line in sys.stdin:
+    if line.strip():
+        parts = line.strip().split("\t")
+        if len(parts) == 2:
+            items.append((int(parts[0]), int(parts[1])))
+items.sort(key=lambda x: x[1], reverse=True)
+for idx, _ in items:
+    print(idx)
+' <<< "$idx_input"))
+        fi
+
+        echo ""
+        echo "=========================================================="
+        echo " CHATS DE ESTE PROYECTO: $proj_name"
+        echo "=========================================================="
+        
+        num_chats=${#sorted_indices[@]}
+        max_show=3
+        [ $num_chats -lt 3 ] && max_show=$num_chats
+        
+        if [ $num_chats -eq 0 ]; then
+            echo "  (No hay chats previos en este proyecto)"
+            echo "  [1] - Iniciar un NUEVO chat en este proyecto"
+            echo "  [0] - Volver al menú principal"
+            echo "=========================================================="
+            read -p "Ingresa una opción [0-1]: " sub_sel
+            if [ "$sub_sel" = "1" ]; then
+                ACTION="new"
+            else
+                echo "Volviendo..."
+                exit 0
+            fi
+        else
+            displayed_sids=()
+            for (( k=0; k<max_show; k++ )); do
+                idx="${sorted_indices[$k]}"
+                sid="${session_ids[$idx]}"
+                upd="${session_updated[$idx]:-0}"
+                title="${session_titles[$idx]:-Sin título}"
+                
+                # Formatear timestamp a fecha legible
+                date_str=$(python3 -c "
+import datetime, sys
+try:
+    ts = int(sys.argv[1]) / 1000.0
+    print(datetime.datetime.fromtimestamp(ts).strftime('%d/%m %H:%M'))
+except Exception:
+    print('reciente')
+" "$upd")
+                
+                # Acortar título si es muy largo
+                if [ ${#title} -gt 50 ]; then
+                    title="${title:0:47}..."
+                fi
+                
+                echo "  [$((k+1))] - Reanudar: [$date_str] \"$title\""
+                displayed_sids+=("$sid")
+            done
+            
+            option_new_chat=$((max_show + 1))
+            echo "  --------------------------------------------------------"
+            echo "  [$option_new_chat] - Iniciar un NUEVO chat en este proyecto"
+            echo "  [0] - Volver al menú principal"
+            echo "=========================================================="
+            read -p "Ingresa una opción [0-$option_new_chat]: " sub_sel
+            
+            if [ -z "$sub_sel" ] || [ "$sub_sel" = "0" ] 2>/dev/null; then
+                echo "Operación cancelada."
+                exit 0
+            elif [ "$sub_sel" -ge 1 ] && [ "$sub_sel" -le "$max_show" ] 2>/dev/null; then
+                ACTION="resume"
+                SESSION_ID="${displayed_sids[$((sub_sel-1))]}"
+            elif [ "$sub_sel" -eq "$option_new_chat" ] 2>/dev/null; then
+                ACTION="new"
+            else
+                echo "Opción inválida."
+                exit 1
+            fi
+        fi
+    fi
+
+# Caso B: INICIAR NUEVO PROYECTO
+elif [ "$seleccion" -eq "$option_new" ] 2>/dev/null; then
+    read -p "Ingresa el nombre de la carpeta para el nuevo proyecto (sin espacios): " new_proj
+    new_proj=$(echo "$new_proj" | tr -cd 'a-zA-Z0-9_-')
+    if [ -z "$new_proj" ]; then
+        echo "Nombre de carpeta inválido."
+        exit 1
+    fi
+    ACTION="new"
+    NEW_PROJECT="$new_proj"
+    SESSION_DIR="${PROJ_ROOT}/${new_proj}"
+    ssh -n -o ConnectTimeout=8 -o BatchMode=yes -p "$SSH_PORT" \
+        "${REMOTE_USER}@${USE_HOST}" "mkdir -p '$SESSION_DIR'" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo "Error: no se pudo crear el directorio en la VPS."
+        exit 1
+    fi
+fi
+
+if [ -z "$ACTION" ]; then
+    echo "Opción inválida."
+    exit 1
+fi
+
+# --- Registrar la actividad bajo el alias (queda en su <alias>.json) ----------
+proj_name_reg=""
+[ -n "$SESSION_DIR" ] && proj_name_reg=$(basename "$SESSION_DIR")
+if [ -n "$SESSION_ID" ]; then
+    [ -n "$proj_name_reg" ] && [ "$proj_name_reg" = "proyectos" ] && proj_name_reg=""
+    if [ -n "$proj_name_reg" ]; then
+        ssh -n -o ConnectTimeout=8 -o BatchMode=yes -p "$SSH_PORT" \
+            "${REMOTE_USER}@${USE_HOST}" \
+            "~/IA/aliases.sh add-session '$ALIAS' '$proj_name_reg' '$SESSION_ID'" \
+            2>/dev/null
+    fi
+elif [ -n "$proj_name_reg" ]; then
+    # Chat nuevo: registramos el proyecto (la sesión se asocia tras crearse)
+    ssh -n -o ConnectTimeout=8 -o BatchMode=yes -p "$SSH_PORT" \
+        "${REMOTE_USER}@${USE_HOST}" \
+        "~/IA/aliases.sh allow '$ALIAS' '$proj_name_reg'" 2>/dev/null
+fi
+
+# --- 4) Verificar túnel permanente (servicio systemd 'opencode-tunnel') ---
+if ! ss -ltn 2>/dev/null | grep -q ":$OPNCD_LOCAL_PORT "; then
+    echo ""
+    echo "Error: el túnel permanente hacia el backend NO está activo (localhost:$OPNCD_LOCAL_PORT)."
+    echo "Arrácalo con:  systemctl --user start opencode-tunnel"
+    echo "(está habilitado y arranca solo con el sistema)"
+    exit 1
+fi
+echo "Túnel permanente activo (localhost:$OPNCD_LOCAL_PORT -> 127.0.0.1:4096)."
+
+echo ""
+echo "Proyecto: $SESSION_DIR"
+[ -n "$SESSION_ID" ] && echo "Sesión: $SESSION_ID" || echo "Sesión: NUEVA"
+
+# --- 5) Adjuntar TUI local de opencode al backend vía túnel ---
+attach_cmd="$LOCAL_OPN attach --username ${OPNCD_SERVER_USERNAME} --password '${OPNCD_SERVER_PASSWORD}' --dir '${SESSION_DIR}'"
+if [ -n "$SESSION_ID" ]; then
+    attach_cmd="${attach_cmd} --session ${SESSION_ID}"
+fi
+attach_cmd="${attach_cmd} http://localhost:${OPNCD_LOCAL_PORT}"
+
+echo ""
+echo "Adjuntando TUI de opencode (render LOCAL) al backend remoto vía túnel permanente..."
+echo "Comando: $attach_cmd"
+echo ""
+eval "$attach_cmd"
+
+echo ""
+echo "Sesión de attach terminada. El backend y el túnel siguen activos en el server."
+
+# --- Registrar sesiones creadas/reanudadas en este proyecto bajo el alias -----
+if [ -n "$SESSION_DIR" ] && [ -n "$proj_name_reg" ]; then
+    ssh -o ConnectTimeout=10 -o BatchMode=yes -p "$SSH_PORT" \
+        "${REMOTE_USER}@${USE_HOST}" \
+        "ALIAS='$ALIAS' PROJ='$proj_name_reg' DIR='$SESSION_DIR' bash -s" <<'REG' 2>/dev/null
+export OPENCODE_SERVER_USERNAME="asere"
+export OPENCODE_SERVER_PASSWORD="YOUR_OPENCODE_PASSWORD"
+python3 - <<'PY'
+import json, os, urllib.request, base64, re, subprocess
+host = os.environ["OPENCODE_SERVER_USERNAME"]
+pw = os.environ["OPENCODE_SERVER_PASSWORD"]
+alias = os.environ.get("ALIAS", "")
+proj = os.environ.get("PROJ", "")
+diro = os.environ.get("DIR", "")
+port = "4096"
+try:
+    out = subprocess.check_output(["ps", "-eo", "args="], text=True, timeout=5).splitlines()
+    for line in out:
+        if "opencode web" in line and "--port" in line:
+            m = re.search(r"--port[ =](\d+)", line)
+            if m:
+                port = m.group(1); break
+except Exception:
+    pass
+creds = base64.b64encode(f"{host}:{pw}".encode()).decode()
+req = urllib.request.Request(f"http://127.0.0.1:{port}/session",
+                             headers={"Authorization": f"Basic {creds}"})
+try:
+    data = json.load(urllib.request.urlopen(req, timeout=8))
+except Exception as e:
+    sys.exit(0)
+for s in data:
+    sid = s.get("id", "")
+    d = s.get("directory", "")
+    if not sid:
+        continue
+    pname = os.path.basename(os.path.normpath(d)) if d else ""
+    if proj and (pname.lower() == proj.lower() or os.path.normpath(d) == os.path.normpath(diro)):
+        subprocess.run(["bash", "-c",
+            f"~/IA/aliases.sh add-session '{alias}' '{proj}' '{sid}'"],
+            timeout=5, capture_output=True)
+PY
+REG
+fi

@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenCode Server (Web Interface & Unified Backend)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/your-user/proyectos
+Environment=OPENCODE_SERVER_PASSWORD=YOUR_OPENCODE_PASSWORD
+Environment=OPENCODE_SERVER_USERNAME=asere
+ExecStart=/home/your-user/.gemini/antigravity-cli/bin/opencode web --port 4096 --hostname 127.0.0.1 --print-logs --log-level INFO
+Restart=on-failure
+MemoryLow=300M
+Nice=0
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,601 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "asereai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AsereAI",
+      "options": {
+        "baseURL": "https://asere.carmayn8n.cloud/v1",
+        "apiKey": "{file:/home/your-user/.config/asere/api_key}"
+      },
+      "models": {
+        "gemma-4-26b-a4b-it": {
+          "name": "gemma-4-26b-a4b-it",
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          }
+        },
+        "gemma-4-31b-it": {
+          "name": "gemma-4-31b-it",
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          }
+        },
+        "openrouter/free": {
+          "name": "Free Models Router",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        }
+      }
+    },
+    "antigravity-direct": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Antigravity Direct (OAuth)",
+      "options": {
+        "baseURL": "http://127.0.0.1:8877/v1",
+        "apiKey": "local"
+      },
+      "models": {
+        "gemini-3.8-flash-tiered": {
+          "name": "Gemini 3.8 Flash Tiered (Antigravity)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "variant": "low"
+        },
+        "gemini-3.8-flash-high": {
+          "name": "Gemini 3.8 Flash High (Antigravity)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+        "gemini-3.8-flash-medium": {
+          "name": "Gemini 3.8 Flash Medium (Antigravity)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+        "gemini-3.8-flash-low": {
+          "name": "Gemini 3.8 Flash Low (Antigravity)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+        "claude-sonnet-5-5": {
+          "name": "Claude Sonnet 5.5 (Antigravity)",
+          "variant": "low",
+          "variants": {
+            "low": {
+              "name": "Claude Sonnet 5.5 Low"
+            },
+            "medium": {
+              "name": "Claude Sonnet 5.5 Medium"
+            },
+            "high": {
+              "name": "Claude Sonnet 5.5 High"
+            }
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          }
+        },
+        "claude-opus-5-5": {
+          "name": "Claude Opus 5.5 (Antigravity)",
+          "variant": "low",
+          "variants": {
+            "low": {
+              "name": "Claude Opus 5.5 Low"
+            },
+            "medium": {
+              "name": "Claude Opus 5.5 Medium"
+            },
+            "high": {
+              "name": "Claude Opus 5.5 High"
+            }
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          }
+        },
+        "gpt-oss-120b-medium": {
+          "name": "GPT-OSS 120B Medium (Antigravity)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "gemini-4-argon": {
+          "name": "Gemini 4 Argon",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "variants": {
+            "low": {
+              "name": "Low Reasoning",
+              "options": {
+                "model": "gemini-4-argon-low"
+              }
+            },
+            "medium": {
+              "name": "Medium Reasoning",
+              "options": {
+                "model": "gemini-4-argon-medium"
+              }
+            },
+            "high": {
+              "name": "High Reasoning",
+              "options": {
+                "model": "gemini-4-argon-high"
+              }
+            }
+          },
+          "variant": "low"
+        }
+      }
+    },
+    "freellmapi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "FreeLLMAPI (Unified Router)",
+      "options": {
+        "baseURL": "http://127.0.0.1:3005/v1",
+        "apiKey": "freellmapi-be8f2acb085c2a306996abf3014b9e6b5460c6e0dbfc551d"
+      },
+      "models": {
+        "auto": {
+          "name": "FreeLLMAPI Auto (Bandit: mejores modelos AGY/Groq/OpenRouter/Mistral por rendimiento)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 262144,
+            "output": 65536
+          }
+        },
+        "gemini-3.8-flash-low": {
+          "name": "Gemini 3.8 Flash Low (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+        "gemini-3.8-flash-tiered": {
+          "name": "Gemini 3.8 Flash Tiered (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "variant": "low"
+        },
+        "gemini-3.8-flash-medium": {
+          "name": "Gemini 3.8 Flash Medium (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+        "gemini-3.8-flash-high": {
+          "name": "Gemini 3.8 Flash High (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+        "claude-sonnet-5-5-low": {
+          "name": "Claude Sonnet 5.5 Low (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude-sonnet-5-5-medium": {
+          "name": "Claude Sonnet 5.5 Medium (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude-sonnet-5-5-high": {
+          "name": "Claude Sonnet 5.5 High (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude-opus-5-5-low": {
+          "name": "Claude Opus 5.5 Low (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude-opus-5-5-high": {
+          "name": "Claude Opus 5.5 High (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "gpt-oss-120b-medium": {
+          "name": "GPT OSS 120B (AGY via FreeLLMAPI)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "gemini-4-argon": {
+          "name": "Gemini 4 Argon",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "variants": {
+            "low": {
+              "name": "Low Reasoning",
+              "options": {
+                "model": "gemini-4-argon-low"
+              }
+            },
+            "medium": {
+              "name": "Medium Reasoning",
+              "options": {
+                "model": "gemini-4-argon-medium"
+              }
+            },
+            "high": {
+              "name": "High Reasoning",
+              "options": {
+                "model": "gemini-4-argon-high"
+              }
+            }
+          },
+          "variant": "low"
+        },
+        "qwen3.8-27b": {
+          "name": "Qwen 3.8 27B (Groq | tools+vision)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 262000,
+            "output": 32768
+          }
+        },
+        "gpt-oss-120b": {
+          "name": "GPT-OSS 120B (Groq | tools)",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          }
+        },
+        "gpt-oss-20b": {
+          "name": "GPT-OSS 20B (Groq | tools, rapidísimo)",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 131072,
+            "output": 16384
+          }
+        },
+        "devstral-2": {
+          "name": "Devstral Medium x2603 (OrcaRouter | código)",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          }
+        },
+        "sensenova-6.8-flash-lite": {
+          "name": "SenseNova 6.8 Flash Lite (OrcaRouter | tools)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          }
+        },
+        "ministral-8b-2512": {
+          "name": "Mistral 8b-2512 (OrcaRouter | tools)",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          }
+        }
+      }
+    }
+  },
+  "model": "freellmapi/gemini-3.8-flash-high",
+  "small_model": "freellmapi/gemini-3.8-flash-low",
+  "mcp": {
+    "engram": {
+      "command": [
+        "/usr/local/bin/engram",
+        "mcp",
+        "--tools=agent"
+      ],
+      "enabled": true,
+      "type": "local"
+    },
+    "n8n_mcp": {
+      "command": [
+        "npx",
+        "-y",
+        "n8n-mcp@latest"
+      ],
+      "enabled": true,
+      "environment": {
+        "N8N_API_URL": "https://carmayn8n.cloud",
+        "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MWVlMmYzOC1hM2ZjLTRiMDAtYjg4My02MGNjYTNkOTJjNTgiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiYTkwZWI3YmMtMzQwNC00YzQ5LWJkNzMtNDZmZmU5ZTFmMzk2IiwiaWF0IjoxNzg0MTM5NTAwfQ.g64Z2RKetsZ9BURvMFCe2gK-_oZGj3X3YbDaQyQViAY"
+      },
+      "type": "local"
+    },
+    "playwright": {
+      "command": [
+        "docker",
+        "exec",
+        "-i",
+        "n8n-app",
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--headless",
+        "--no-sandbox",
+        "--executable-path",
+        "/usr/bin/chromium",
+        "--caps",
+        "vision",
+        "--viewport-size",
+        "1440x900"
+      ],
+      "enabled": true,
+      "type": "local"
+    }
+  },
+  "shell": "tmux",
+  "plugin": [
+    "file:///home/your-user/.config/opencode/plugins/sdd-governance.ts",
+    "file:///home/your-user/.config/opencode/plugins/quota-monitor.ts"
+  ],
+  "command": {
+    "quota": {
+      "description": "Consultar cuota en vivo de Google Antigravity y AI (Argon, Flash, Claude, GPT)",
+      "template": "Ejecuta el comando en bash `/home/your-user/.local/bin/quota` e imprime la tarjeta gráfica completa de cuotas, barras de progreso y tiempos de reseteo para el usuario sin recortar nada."
+    }
+  },
+  "commands": {
+    "quota": {
+      "description": "Consultar cuota en vivo de Google Antigravity y AI (Argon, Flash, Claude, GPT)",
+      "template": "Ejecuta el comando en bash `/home/your-user/.local/bin/quota` e imprime la tarjeta gráfica completa de cuotas, barras de progreso y tiempos de reseteo para el usuario sin recortar nada."
+    }
+  }
+}

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# =============================================================================
+# vps-gentle — Lanzador para Linux/macOS de Gentle Shell (Eternal Terminal + Tmux)
+# =============================================================================
+
+REMOTE_USER="your-user"
+REMOTE_HOST_WG="10.8.0.1"
+REMOTE_HOST_PUB="YOUR_VPS_IP"
+SSH_PORT="22"
+ET_PORT="2022"
+REMOTE_CMD="/home/your-user/scripts/vps-gentle-menu.sh"
+
+clear
+echo "=========================================================="
+echo "    CONECTANDO A GENTLE SHELL EN VPS (Eternal Terminal)    "
+echo "=========================================================="
+echo ""
+
+# 1. Elegir ruta: WireGuard o IP pública
+if ! ping -c 1 -W 2 "$REMOTE_HOST_WG" &>/dev/null; then
+    if command -v wg-quick >/dev/null 2>&1; then
+        echo "Intentando activar interfaz WireGuard (wg0)..."
+        sudo wg-quick up wg0 &>/dev/null || true
+        sleep 1
+    fi
+fi
+
+if ping -c 1 -W 2 "$REMOTE_HOST_WG" &>/dev/null; then
+    TARGET_HOST="$REMOTE_HOST_WG"
+    echo "Ruta: WireGuard ($TARGET_HOST) [Activo]"
+else
+    TARGET_HOST="$REMOTE_HOST_PUB"
+    echo "Ruta: IP pública ($TARGET_HOST) [WireGuard no disponible]"
+fi
+
+echo ""
+
+# 2. Conectar mediante Eternal Terminal si existe, o SSH afinado como fallback
+REMOTE_TERMINAL_PATH="/home/your-user/.local/bin/etterminal"
+if command -v et >/dev/null 2>&1; then
+    echo "Iniciando Eternal Terminal hacia $TARGET_HOST (ET port: $ET_PORT, SSH port: $SSH_PORT)..."
+    exec et -u "$REMOTE_USER" --port "$ET_PORT" --ssh-option "Port=$SSH_PORT" --terminal-path "$REMOTE_TERMINAL_PATH" "$TARGET_HOST" -c "$REMOTE_CMD"
+elif [ -x "$HOME/.local/bin/et" ]; then
+    echo "Iniciando Eternal Terminal (~/.local/bin/et) hacia $TARGET_HOST..."
+    exec "$HOME/.local/bin/et" -u "$REMOTE_USER" --port "$ET_PORT" --ssh-option "Port=$SSH_PORT" --terminal-path "$REMOTE_TERMINAL_PATH" "$TARGET_HOST" -c "$REMOTE_CMD"
+else
+    echo "Aviso: 'et' no está instalado en este equipo cliente."
+    echo "Conectando mediante SSH de ultra-baja latencia (TCP_NODELAY)..."
+    echo "(Para reconexión automática sin cortes, instala ET con: brew install et o apt install et)"
+    echo ""
+    exec ssh -t -p "$SSH_PORT" \
+        -o TCPKeepAlive=yes \
+        -o ServerAliveInterval=15 \
+        -o ServerAliveCountMax=4 \
+        -o IPQoS=throughput \
+        "${REMOTE_USER}@${TARGET_HOST}" "$REMOTE_CMD"
+fi

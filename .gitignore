@@ -1,0 +1,24 @@
+# Secrets and Private Keys
+id_*
+*.pem
+*.key
+*.priv
+.env
+.env.*
+!.env.example
+
+# Operating System
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dependencies & Build artifacts
+node_modules/
+dist/
+build/
+*.tmp
+*.log
+
+# Caches
+.cache/
+.atl/.skill-registry.cache.json
