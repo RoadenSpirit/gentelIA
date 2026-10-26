@@ -2,9 +2,11 @@
 # =============================================================================
 # install-ubuntu-client.sh — Instalador Automatizado de Gentle Shell & Conexión VPS
 # Diseñado para Ubuntu 22.04 LTS (Jammy Jellyfish) y derivados.
+# Incluye control de errores con pausa obligatoria (nunca cierra la terminal solo).
 # =============================================================================
 
-set -euo pipefail
+set -u
+set -o pipefail
 
 ROSE='\033[38;5;205m'
 GREEN='\033[0;32m'
@@ -12,6 +14,34 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
+
+# Función para pausar de forma segura (funciona incluso si se ejecuta via curl | bash)
+pause_terminal() {
+    echo ""
+    if [ -t 0 ]; then
+        read -r -p "Presiona [ENTER] para continuar..." dummy || true
+    elif [ -e /dev/tty ]; then
+        read -r -p "Presiona [ENTER] para continuar..." dummy < /dev/tty || true
+    else
+        echo "Finalizado."
+        sleep 5
+    fi
+}
+
+# Trampa de captura de errores para que la ventana NUNCA se cierre abruptamente
+on_error() {
+    local exit_code=$?
+    local line_no=$1
+    echo ""
+    echo -e "${RED}==========================================================${NC}"
+    echo -e "${RED}  [ERROR] Ocurrió un error en la línea ${line_no} (Código: ${exit_code})${NC}"
+    echo -e "${RED}==========================================================${NC}"
+    echo -e "${YELLOW}La instalación no se completó de forma limpia.${NC}"
+    echo -e "Revisa los mensajes anteriores para identificar la causa."
+    pause_terminal
+    exit "${exit_code}"
+}
+trap 'on_error $LINENO' ERR
 
 echo -e "${ROSE}"
 cat << 'EOF'
@@ -27,30 +57,42 @@ echo -e "${ROSE}   GENTLE SHELL — INSTALADOR Y PRECONFIGURADOR (UBUNTU 22)${NC
 echo -e "${BLUE}==========================================================${NC}"
 echo ""
 
+# Solicitar permisos de sudo al inicio de forma limpia
+echo -e "${BLUE}[Seguridad] Solicitando permisos administrativos (sudo)...${NC}"
+sudo -v || {
+    echo -e "${RED}No se obtuvieron permisos de sudo. Abortando.${NC}"
+    pause_terminal
+    exit 1
+}
+
 # 1. Comprobar que corre en Linux
 if [ "$(uname -s)" != "Linux" ]; then
     echo -e "${RED}[ERROR] Este instalador está optimizado para sistemas Linux (Ubuntu 22.04).${NC}"
+    pause_terminal
     exit 1
 fi
 
-echo -e "${YELLOW}[1/5] Comprobando e instalando dependencias del sistema...${NC}"
+echo -e "${YELLOW}[1/5] Actualizando repositorios e instalando dependencias base...${NC}"
 sudo apt update -y
 sudo apt install -y curl git software-properties-common wireguard-tools
 
-# 2. Instalar Eternal Terminal (ET) desde PPA oficial
-echo -e "${YELLOW}[2/5] Configurando Eternal Terminal (ET) para baja latencia...${NC}"
+# 2. Instalar Eternal Terminal (ET)
+echo -e "${YELLOW}[2/5] Configurando Eternal Terminal (ET) para ultra-baja latencia...${NC}"
 if ! command -v et >/dev/null 2>&1; then
-    echo -e "${BLUE}Añadiendo PPA oficial de Eternal Terminal (ppa:jgmath2000/et)...${NC}"
+    echo -e "${BLUE}Añadiendo repositorio oficial de Eternal Terminal (ppa:jgmath2000/et)...${NC}"
     sudo add-apt-repository -y ppa:jgmath2000/et || true
     sudo apt update -y
-    sudo apt install -y et || {
-        echo -e "${YELLOW}Aviso: No se pudo instalar ET desde PPA. Usaremos conexión SSH ultra-optimizada.${NC}"
-    }
+    if sudo apt install -y et; then
+        echo -e "${GREEN}[OK] Eternal Terminal (et) instalado correctamente.${NC}"
+    else
+        echo -e "${YELLOW}[AVISO] No se pudo instalar el paquete 'et' vía apt.${NC}"
+        echo -e "${YELLOW}El sistema funcionará utilizando SSH directo ultra-optimizado (TCP_NODELAY).${NC}"
+    fi
 else
-    echo -e "${GREEN}[OK] Eternal Terminal ya está instalado.${NC}"
+    echo -e "${GREEN}[OK] Eternal Terminal (et) ya está disponible en el sistema.${NC}"
 fi
 
-# 3. Comprobar o instalar Node.js 22 LTS si el usuario quiere Pi local
+# 3. Comprobar o instalar Node.js 22 LTS
 echo -e "${YELLOW}[3/5] Verificando runtime de Node.js v22 (LTS)...${NC}"
 NODE_READY=false
 if command -v node >/dev/null 2>&1; then
@@ -63,7 +105,7 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 if [ "$NODE_READY" = false ]; then
-    echo -e "${BLUE}Instalando Node.js v22 LTS oficial...${NC}"
+    echo -e "${BLUE}Instalando Node.js v22 LTS oficial desde NodeSource...${NC}"
     curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
     sudo apt install -y nodejs
     echo -e "${GREEN}[OK] Node.js $(node -v) instalado exitosamente.${NC}"
@@ -128,7 +170,7 @@ echo "$CATALOG_JSON" > "$HOME/.gentle-shell/agent/models.json"
 echo "$CATALOG_JSON" > "$HOME/.pi/agent/models.json"
 echo "$SETTINGS_JSON" > "$HOME/.gentle-shell/agent/settings.json"
 echo "$SETTINGS_JSON" > "$HOME/.pi/agent/settings.json"
-echo -e "${GREEN}[OK] Proveedor FreeLLMAPI y modelos configurados.${NC}"
+echo -e "${GREEN}[OK] Proveedor FreeLLMAPI y catálogo de modelos configurados.${NC}"
 
 # 5. Instalar el comando global de conexión 'gentle-connect' y 'vps-gentle'
 echo -e "${YELLOW}[5/5] Instalando lanzador global en el sistema...${NC}"
@@ -161,10 +203,10 @@ echo ""
 
 # Usar ET si está disponible, o fallback a SSH con TCP_NODELAY
 if command -v et >/dev/null 2>&1; then
-    echo "Iniciando Eternal Terminal hacia $TARGET_HOST..."
+    echo "Iniciando Eternal Terminal hacia $TARGET_HOST (ET: $ET_PORT, SSH: $SSH_PORT)..."
     exec et -u "$REMOTE_USER" --port "$ET_PORT" --ssh-option "Port=$SSH_PORT" --terminal-path "$REMOTE_TERMINAL_PATH" "$TARGET_HOST" -c "$REMOTE_CMD"
 else
-    echo "Conectando mediante SSH de ultra-baja latencia..."
+    echo "Conectando mediante SSH de ultra-baja latencia (TCP_NODELAY)..."
     exec ssh -t -p "$SSH_PORT" \
         -o TCPKeepAlive=yes \
         -o ServerAliveInterval=15 \
@@ -179,7 +221,7 @@ echo "$LAUNCHER_SCRIPT" > "$HOME/.local/bin/vps-gentle"
 echo "$LAUNCHER_SCRIPT" > "$HOME/.local/bin/gentle-connect"
 chmod +x "$HOME/.local/bin/vps-gentle" "$HOME/.local/bin/gentle-connect"
 
-# Crear también enlace en /usr/local/bin para disponibilidad global de todos los usuarios
+# Enlace en /usr/local/bin para disponibilidad global de todos los usuarios
 if sudo cp "$HOME/.local/bin/gentle-connect" /usr/local/bin/gentle-connect 2>/dev/null; then
     sudo chmod +x /usr/local/bin/gentle-connect
     sudo cp "$HOME/.local/bin/vps-gentle" /usr/local/bin/vps-gentle 2>/dev/null || true
@@ -200,3 +242,7 @@ echo -e " - Puerto SSH:     ${BLUE}22${NC}"
 echo -e " - Puerto ET:      ${BLUE}2022${NC}"
 echo -e " - Provider LLM:   ${BLUE}FreeLLMAPI (omni.carmayn8n.cloud)${NC}"
 echo ""
+
+# Pausa obligatoria final para que el usuario pueda ver el resultado siempre
+echo -e "${YELLOW}----------------------------------------------------------${NC}"
+pause_terminal
