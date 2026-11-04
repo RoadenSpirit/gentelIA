@@ -76,22 +76,6 @@ if [ -z "$ALIAS" ]; then
     echo ""
 fi
 
-# --- opencode local es obligatorio (es quien dibuja la TUI en tu PC) ---
-LOCAL_OPN=""
-if command -v opencode >/dev/null 2>&1; then
-    LOCAL_OPN="opencode"
-else
-    for c in ~/.opencode/bin/opencode /usr/local/bin/opencode; do
-        [ -x "$c" ] && LOCAL_OPN="$c" && break
-    done
-fi
-if [ -z "$LOCAL_OPN" ]; then
-    echo "Error: no hay binario 'opencode' local. La TUI debe correr en tu PC."
-    echo "Instálalo con:  curl -fsSL https://opencode.ai/install | bash"
-    exit 1
-fi
-echo "TUI local: $LOCAL_OPN ($("$LOCAL_OPN" --version 2>/dev/null | head -1))"
-echo ""
 
 # --- 1) Elegir ruta: intentar WireGuard (10.8.0.1), iniciar wg0 si hace falta, fallback a IP pública ---
 USE_HOST=""
@@ -129,6 +113,79 @@ if [ $? -ne 0 ]; then
     fi
 fi
 echo "Conexión SSH comprobada con éxito ($USE_HOST)."
+
+# =============================================================================
+# MENÚ UNIFICADO DE ENTORNO: OpenCode Web/TUI vs Gentle Shell
+# =============================================================================
+clear
+echo "=========================================================="
+echo "         VPS CARMAY DEV — SELECTOR DE ENTORNO AI          "
+echo "=========================================================="
+echo "  Ruta activa: $USE_HOST (SSH :$SSH_PORT)"
+[ -n "$ALIAS" ] && echo "  Alias local: $ALIAS"
+echo "=========================================================="
+echo ""
+echo "Elige qué entorno deseas iniciar:"
+echo "  [1] - OpenCode (TUI Local adjuntada al Backend VPS :4096)"
+echo "  [2] - Gentle Shell (Sesiones persistentes en tmux + Eternal Terminal/SSH)"
+echo "  [0] - Salir"
+echo "=========================================================="
+read -p "Opción [1-2, 0 para salir]: " env_sel
+
+if [ "$env_sel" = "0" ] || [ -z "$env_sel" ]; then
+    echo "Saliendo."
+    exit 0
+fi
+
+# Si seleccionó Gentle Shell, lanzamos directamente el menú de Gentle Shell en la VPS
+if [ "$env_sel" = "2" ]; then
+    ET_PORT="2022"
+    REMOTE_GENTLE_CMD="/home/your-user/scripts/vps-gentle-menu.sh"
+    REMOTE_TERMINAL_PATH="/home/your-user/.local/bin/etterminal"
+
+    clear
+    echo "=========================================================="
+    echo "            INICIANDO GENTLE SHELL EN LA VPS             "
+    echo "=========================================================="
+    echo "Host: $USE_HOST"
+    echo ""
+
+    if command -v et >/dev/null 2>&1; then
+        echo "Conectando mediante Eternal Terminal (reconexión automática)..."
+        exec et -u "$REMOTE_USER" --port "$ET_PORT" --ssh-option "Port=$SSH_PORT" --terminal-path "$REMOTE_TERMINAL_PATH" "$USE_HOST" -c "$REMOTE_GENTLE_CMD"
+    elif [ -x "$HOME/.local/bin/et" ]; then
+        echo "Conectando mediante Eternal Terminal local (~/.local/bin/et)..."
+        exec "$HOME/.local/bin/et" -u "$REMOTE_USER" --port "$ET_PORT" --ssh-option "Port=$SSH_PORT" --terminal-path "$REMOTE_TERMINAL_PATH" "$USE_HOST" -c "$REMOTE_GENTLE_CMD"
+    else
+        echo "Aviso: Eternal Terminal ('et') no detectado en este cliente."
+        echo "Conectando directamente por SSH interactivo optimizado..."
+        echo ""
+        exec ssh -t -p "$SSH_PORT" \
+            -o TCPKeepAlive=yes \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o IPQoS=throughput \
+            "${REMOTE_USER}@${USE_HOST}" "$REMOTE_GENTLE_CMD"
+    fi
+    exit 0
+fi
+
+# Si seleccionó 1 (OpenCode), comprobamos la TUI local antes de continuar
+LOCAL_OPN=""
+if command -v opencode >/dev/null 2>&1; then
+    LOCAL_OPN="opencode"
+else
+    for c in ~/.opencode/bin/opencode /usr/local/bin/opencode; do
+        [ -x "$c" ] && LOCAL_OPN="$c" && break
+    done
+fi
+if [ -z "$LOCAL_OPN" ]; then
+    echo "Error: no hay binario 'opencode' local en tu PC. La TUI debe correr en tu PC."
+    echo "Instálalo con:  curl -fsSL https://opencode.ai/install | bash"
+    exit 1
+fi
+
+echo "TUI local: $LOCAL_OPN ($("$LOCAL_OPN" --version 2>/dev/null | head -1))"
 echo "Obteniendo estado del server (backend, sesiones y proyectos)..."
 
 # --- Registrar el alias en la VPS si aún no existe ----------------------------
@@ -488,15 +545,33 @@ elif [ -n "$proj_name_reg" ]; then
         "~/IA/aliases.sh allow '$ALIAS' '$proj_name_reg'" 2>/dev/null
 fi
 
-# --- 4) Verificar túnel permanente (servicio systemd 'opencode-tunnel') ---
+# --- 4) Verificar túnel permanente (servicio systemd 'opencode-tunnel' o ssh en background) ---
 if ! ss -ltn 2>/dev/null | grep -q ":$OPNCD_LOCAL_PORT "; then
-    echo ""
-    echo "Error: el túnel permanente hacia el backend NO está activo (localhost:$OPNCD_LOCAL_PORT)."
-    echo "Arrácalo con:  systemctl --user start opencode-tunnel"
-    echo "(está habilitado y arranca solo con el sistema)"
-    exit 1
+    echo "Túnel local en puerto $OPNCD_LOCAL_PORT no detectado. Intentando levantarlo..."
+    # 1) Intentar arrancar servicio de usuario si existe
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start opencode-tunnel 2>/dev/null || true
+        sleep 1
+    fi
+
+    # 2) Si sigue sin levantar, abrir túnel SSH en background directamente hacia la ruta activa
+    if ! ss -ltn 2>/dev/null | grep -q ":$OPNCD_LOCAL_PORT "; then
+        echo "Levantando túnel SSH automático hacia $USE_HOST:$SSH_PORT..."
+        ssh -f -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            -L "$OPNCD_LOCAL_PORT:127.0.0.1:$REMOTE_PORT" -p "$SSH_PORT" "${REMOTE_USER}@${USE_HOST}" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # 3) Comprobar de nuevo
+    if ! ss -ltn 2>/dev/null | grep -q ":$OPNCD_LOCAL_PORT "; then
+        echo ""
+        echo "Error: No se pudo levantar el túnel hacia el backend (localhost:$OPNCD_LOCAL_PORT)."
+        echo "Comprueba tu conexión o arráncalo manualmente con:"
+        echo "  ssh -N -L $OPNCD_LOCAL_PORT:127.0.0.1:$REMOTE_PORT -p $SSH_PORT ${REMOTE_USER}@${USE_HOST}"
+        exit 1
+    fi
 fi
-echo "Túnel permanente activo (localhost:$OPNCD_LOCAL_PORT -> 127.0.0.1:4096)."
+echo "Túnel activo (localhost:$OPNCD_LOCAL_PORT -> $USE_HOST:$REMOTE_PORT)."
 
 echo ""
 echo "Proyecto: $SESSION_DIR"
