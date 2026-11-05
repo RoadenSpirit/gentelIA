@@ -11,9 +11,12 @@ export TERM="xterm-256color"
 PROJ_ROOT="/home/your-user/proyectos"
 mkdir -p "$PROJ_ROOT"
 
-# Función para listar sesiones tmux que empiezan con 'gentle-'
+# Usar socket dedicado para que todas las sesiones y clientes se reconozcan siempre
+TMUX_CMD="tmux -L gentle"
+
+# Función para listar sesiones tmux activas en el socket unificado
 get_active_sessions() {
-    tmux list-sessions -F "#{session_name}" 2>/dev/null | grep '^gentle-' || true
+    $TMUX_CMD list-sessions -F "#{session_name}" 2>/dev/null | grep '^gentle-' || true
 }
 
 while true; do
@@ -45,28 +48,43 @@ while true; do
         echo ""
     fi
 
-    # 2. Listar proyectos en /home/your-user/proyectos
-    projs=($(find "$PROJ_ROOT" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort))
-    echo "--- 📁 PROYECTOS DISPONIBLES EN ~/proyectos ---"
-    for p in "${projs[@]}"; do
-        # Verificar si ya tiene sesión activa
-        if [[ " ${active_sessions[*]} " =~ " gentle-${p} " ]]; then
-            continue
-        fi
-        echo "  [$opt_num] - Iniciar en: $p"
+    # 2. Listar carpetas de proyectos disponibles en ~/proyectos
+    echo "--- 📁 INICIAR NUEVA SESIÓN EN PROYECTO EXISTENTE ---"
+    for dir in "$PROJ_ROOT"/*/; do
+        [ -d "$dir" ] || continue
+        dirname=$(basename "$dir")
+        sess_name="gentle-$dirname"
+
+        # Si ya tiene sesión activa, omitir de esta lista
+        is_active=0
+        for s in "${active_sessions[@]}"; do
+            if [ "$s" = "$sess_name" ]; then
+                is_active=1
+                break
+            fi
+        done
+        [ $is_active -eq 1 ] && continue
+
+        echo "  [$opt_num] - Iniciar en: $dirname"
         opt_actions[$opt_num]="start"
-        opt_targets[$opt_num]="$p"
+        opt_targets[$opt_num]="$dirname"
         ((opt_num++))
     done
     echo ""
 
-    # 3. Opciones generales
+    # 3. Opciones generales y de gestión
     opt_new=$opt_num
+    ((opt_num++))
+    opt_kill=$opt_num
+
     echo "--- ⚙️  OPCIONES GENERALES ---"
     echo "  [$opt_new] - NUEVO PROYECTO (crea nueva carpeta y arranca)"
+    if [ ${#active_sessions[@]} -gt 0 ]; then
+        echo "  [$opt_kill] - 🗑️  CERRAR/TERMINAR UNA SESIÓN ACTIVA"
+    fi
     echo "  [0] - Salir de la terminal"
     echo "=========================================================="
-    read -p "Selecciona una opción [0-$opt_new]: " choice
+    read -p "Selecciona una opción [0-$opt_num]: " choice
 
     if [ -z "$choice" ] || [ "$choice" = "0" ]; then
         echo "Hasta pronto."
@@ -81,7 +99,28 @@ while true; do
             mkdir -p "$p_dir"
             sess_name="gentle-$new_p"
             echo "Iniciando Gentle Shell en $p_dir..."
-            tmux new-session -s "$sess_name" -c "$p_dir" "gentle-shell"
+            $TMUX_CMD new-session -s "$sess_name" -c "$p_dir" "gentle-shell"
+        fi
+        continue
+    fi
+
+    if [ ${#active_sessions[@]} -gt 0 ] && [ "$choice" = "$opt_kill" ]; then
+        echo ""
+        echo "--- SELECCIONA LA SESIÓN QUE DESEAS TERMINAR ---"
+        k_num=1
+        declare -A kill_targets
+        for s in "${active_sessions[@]}"; do
+            echo "  [$k_num] - $s"
+            kill_targets[$k_num]="$s"
+            ((k_num++))
+        done
+        echo "  [0] - Cancelar"
+        read -p "Opción a terminar: " k_choice
+        if [ -n "$k_choice" ] && [ "$k_choice" != "0" ] && [ -n "${kill_targets[$k_choice]:-}" ]; then
+            target_to_kill="${kill_targets[$k_choice]}"
+            echo "Cerrando $target_to_kill..."
+            $TMUX_CMD kill-session -t "$target_to_kill" 2>/dev/null || true
+            sleep 1
         fi
         continue
     fi
@@ -91,12 +130,12 @@ while true; do
 
     if [ "$action" = "attach" ]; then
         echo "Reconectando a sesión $target..."
-        tmux attach-session -t "$target"
+        $TMUX_CMD attach-session -t "$target"
     elif [ "$action" = "start" ]; then
         p_dir="$PROJ_ROOT/$target"
         sess_name="gentle-$target"
         echo "Iniciando sesión $sess_name en $p_dir..."
-        tmux new-session -s "$sess_name" -c "$p_dir" "gentle-shell"
+        $TMUX_CMD new-session -s "$sess_name" -c "$p_dir" "gentle-shell"
     else
         echo "Opción inválida. Presiona Enter para continuar..."
         read -r
