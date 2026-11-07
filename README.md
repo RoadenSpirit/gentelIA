@@ -1,82 +1,87 @@
-# gentelIA — Copia de seguridad del entorno OpenCode (VPS)
+# Gentle IA — Framework de Infraestructura y Desarrollo Remoto Asistido por IA
 
-Copia del **script actual del lanzador de OpenCode** y de **toda la documentación
-e infraestructura asociada** que corre en esta VPS (`your-user`).
+**Gentle IA** es una suite de herramientas, lanzadores y configuraciones para conectar clientes locales (Linux, Windows, macOS) con un entorno de desarrollo remoto de ultra-baja latencia en un servidor VPS dedicado, maximizando la productividad en ingeniería de software asistida por IA.
 
-> Snapshot tomado el 2026-10-24, actualizado al 2026-10-26. Solo lectura/copia: no
-> sustituye los archivos originales en producción.
+Integra en un único flujo de trabajo:
+- **TUI & Web AI Agents:** Túneles seguros para OpenCode y agentes autónomos remotos.
+- **Gentle Shell:** Sesiones persistentes de desarrollo asistido con **Tmux** y **Eternal Terminal (ET)** para reconexión instantánea a 0ms sin pérdida de contexto ante cortes de red.
+- **Failover Dinámico de Conexión:** Conmutación automática e inteligente entre red interna WireGuard y fallback SSH.
+- **Integración con Gateways LLM:** Consumo centralizado de modelos de lenguaje mediante endpoints y proxies locales.
 
-## Contenido
+---
+
+## 🏗️ Arquitectura del Sistema
+
+```text
+  [ Cliente Local (Windows / Linux / macOS) ]
+                      │
+           ┌──────────┴──────────┐
+           ▼                     ▼
+     [ WireGuard ]         [ SSH / ET ]
+    (Ruta Primaria)       (Ruta Fallback)
+           │                     │
+           └──────────┬──────────┘
+                      ▼
+             [ Servidor VPS ]
+      ┌───────────────────────────────┐
+      │ • Eternal Terminal Server     │
+      │ • Tmux Workspace Sessions     │
+      │ • OpenCode AI Server (:4096)  │
+      │ • FreeLLMAPI Gateway (:3005)  │
+      └───────────────────────────────┘
+```
+
+## 📁 Estructura del Repositorio
 
 ```
 gentelIA/
-├── README.md                      <- este índice
+├── README.md                          <- Documentación maestra
 ├── scripts/
-│   ├── vps-tunnel                 <- LANZADOR PRINCIPAL (selector de entorno AI)
-│   └── opencode-quota-widget/
-│       ├── injector.mjs           <- inyector del widget de cuota (Node)
-│       └── _quota_widget.js       <- UI/JS del widget de cuota
+│   ├── vps-tunnel                     <- Lanzador interactivo cliente (OpenCode / Gentle Shell)
+│   ├── vps-gentle-menu.sh             <- Gestor interactivo de sesiones Tmux en el VPS
+│   ├── install-ubuntu-client.sh       <- Script de aprovisionamiento para clientes Ubuntu
+│   └── opencode-quota-widget/         <- Widget de métricas y cuotas en tiempo real
 ├── config/
-│   ├── opencode.json              <- configuración activa de OpenCode (providers/modelos)
-│   └── systemd/
-│       ├── opencode-server.service        <- backend opencode web (puerto 4096)
-│       └── opencode-quota-widget.service  <- servicio del widget de cuota
+│   ├── opencode.json                  <- Plantilla de configuración de proveedores y modelos
+│   └── systemd/                       <- Unidades de servicio systemd para demonios remotos
+│       ├── opencode-server.service
+│       ├── etserver.service
+│       └── opencode-quota-widget.service
 └── docs/
-    ├── CONEXION_VPS_README.md            <- guía completa de conexión a la VPS
-    ├── CONVENCIONES_VPS.md               <- estándares, puertos y servicios del VPS
-    ├── GUIA_DESARROLLO_EMPRESARIAL.md    <- método de trabajo asistido por IA
-    ├── setup-opencode-antigravity.md     <- configuración histórica OpenCode + Antigravity
-    └── windows/
-        ├── setup_windows.ps1             <- instalación del túnel en Windows (PowerShell)
-        └── setup_windows.bat             <- lanzador de setup_windows.ps1
+    ├── GUIA_COMPLETA_GENTLE_SHELL.md  <- Guía de terminal persistente con Eternal Terminal
+    ├── GUIA_DESARROLLO_EMPRESARIAL.md <- Metodología SDD (Spec-Driven Development)
+    ├── CONVENCIONES_VPS.md            <- Estándares y matriz de infraestructura
+    └── windows/                       <- Scripts de aprovisionamiento para clientes Windows
 ```
 
-## Arquitectura (resumen)
+## 🚀 Puesta en Marcha Rápida
 
-- **TUI de OpenCode** corre en el PC del usuario (`opencode attach`) a través de un
-  túnel SSH.
-- **Backend OpenCode Web** (`opencode web`) corre en la VPS como servicio systemd
-  de usuario: `opencode-server.service`, escuchando en `127.0.0.1:4096`.
-- **Todas** las llamadas a IA/MCP/archivos se ejecutan en el servidor.
-- El script `vps-tunnel` es un **selector de entorno AI** con dos modos:
-    - `[1] OpenCode` — TUI local adjuntada al backend VPS (`:4096`).
-    - `[2] Gentle Shell` — sesiones persistentes en tmux + Eternal Terminal/SSH.
-      Lanza `/home/your-user/scripts/vps-gentle-menu.sh` en la VPS.
-  Usa WireGuard (`10.8.0.1`) como primera opción y cae a la IP pública
-  (`YOUR_VPS_IP`) como respaldo.
+### 1. Requisitos Previos
+- Servidor VPS con Linux (Ubuntu/Debian recomendado).
+- Cliente local con SSH o WireGuard.
 
-## Gentle Shell (integrado en vps-tunnel)
+### 2. Configuración de Variables
+Edita las plantillas con tus datos antes de ejecutar los lanzadores:
+- `YOUR_VPS_IP`: Dirección IP pública de tu servidor.
+- `YOUR_SSH_PORT`: Puerto SSH (por defecto `22` o puerto personalizado).
+- `YOUR_USER`: Usuario en el servidor remoto.
+- `YOUR_OPENCODE_PASSWORD`: Contraseña asignada para la autenticación web de OpenCode.
 
-- `gentle-ai` (v4.3.0) es el gestor de ecosistema Gentle AI en la VPS:
-  `install | sync | upgrade | doctor | version`.
-- El menú `vps-gentle-menu.sh` gestiona sesiones tmux `gentle-<proyecto>`:
-  reconectar sesiones activas, iniciar en un proyecto o crear uno nuevo.
-- Provider por defecto: `FreeLLMAPI` (`http://127.0.0.1:3005/v1`).
-- Eternal Terminal (`et`) en la VPS (`~/.local/bin/et`) permite reconexión
-  automática; el lanzador cae a SSH si no está disponible localmente.
-
-## Datos de conexión
-
-| Dato | Valor |
-|---|---|
-| SSH | `your-user@YOUR_VPS_IP` (puerto `22`) |
-| SSH por WireGuard | `your-user@10.8.0.1` (puerto `22`) |
-| OpenCode Web | `127.0.0.1:4096` (tunelado) |
-| Usuario OpenCode | `asere` |
-| Password OpenCode | `YOUR_OPENCODE_PASSWORD` |
-
-## Uso rápido
-
+### 3. Conexión desde el Cliente
+En Linux/macOS:
 ```bash
-# En el PC (ya instalado en PATH)
-vps-tunnel          # elige [1] OpenCode o [2] Gentle Shell
-
-# Directo en la VPS
-opencode web --port 4096 --hostname 127.0.0.1
-gentle-ai doctor
+./scripts/vps-tunnel
+```
+En Windows (PowerShell / CMD):
+```cmd
+cd docs/windows
+conectar_gentle.bat
 ```
 
-## Restauración
+---
+
+## 🛡️ Licencia y Propósito
+Este repositorio se publica como referencia técnica y plantilla de arquitectura para desarrolladores que buscan implementar estaciones de trabajo de desarrollo con IA en servidores remotos sin latencia y con tolerancia a desconexiones.
 
 Para restaurar en la VPS desde esta copia:
 
